@@ -34,12 +34,12 @@ class author:
 
 class publicacion:
     def __init__(self, title,doi):
-        def clean_title(vtitle):
+        def clean(vtitle):
             vtitle = re.compile(r'<[^>]+>').sub('', vtitle)
-            return ''.join(str(vtitle).replace('\n', ' ').replace('\r', '').split())
+            return ' '.join(str(vtitle).replace('\n', ' ').replace('\r', '').split())
         self.authors=[]
-        self.doi=doi
-        self.title=clean_title(title)
+        self.doi=clean(doi)
+        self.title=clean(title)
         self.vol=''
         self.issn=''
         self.journal=''
@@ -59,7 +59,7 @@ class publicacion:
         return ', '.join(autlista)
 
     def getstrtoprint(self):
-        return self.get_autorlist()+self.anno+self.title+self.journal+self.vol+self.doi+"publicado"
+        return self.get_autorlist()+'|'+self.anno+'|'+self.title+'|'+self.journal+'|'+self.vol+'|'+self.doi+'|'+"publicado"
 
 
 def journalsearch(journalname):
@@ -69,11 +69,9 @@ def journalsearch(journalname):
         candidateRow = JOURNALS[JOURNALS["Journal name"] == match[0]]
         print("->", candidateRow["Journal name"].values[0])
         if candidateRow['ISSN'].values[0] is np.NAN:
-            return candidateRow["eISSN"].values[0], round(candidateRow["2021 JIF"].values[0], 3), \
-                   candidateRow['JIF Quartile'].values[0]
+            return candidateRow["eISSN"].values[0], round(candidateRow["2021 JIF"].values[0], 3),candidateRow['JIF Quartile'].values[0]
         else:
-            return candidateRow["ISSN"].values[0], round(candidateRow["2021 JIF"].values[0], 3), \
-                   candidateRow['JIF Quartile'].values[0]
+            return candidateRow["ISSN"].values[0], round(candidateRow["2021 JIF"].values[0], 3), candidateRow['JIF Quartile'].values[0]
     print("no match")
     return "X-X", 0.0, 'n/a'
 
@@ -85,8 +83,8 @@ if len(sys.argv) > 1:
 else:
     doifile = "PatricioOrio.doi"
 bibfile = doifile.split(".")[0] + ".txt"
-outbibs = []
 outpubz = []
+
 with open(doifile) as dois:
     for line in dois:
         if "doi.org" in line:
@@ -95,51 +93,36 @@ with open(doifile) as dois:
         print(url, end=" JSON ")
         req = urllib.request.Request(url)
         req.add_header('Accept', 'application/json')
-
-        #try:
-        with urllib.request.urlopen(req, timeout=5) as f:
-            json = loads(f.read().decode("utf-8"))
-        pub=publicacion(json["title"],url)
-        pub.add_authors(json['author'])
         try:
-            vol = ""
-            if 'volume' in json.keys():
-                vol = json["volume"]
-            if 'page' in json.keys():
-                vol = vol + ':' + json["page"]
-            elif 'issue' in json.keys():
-                vol = vol + '(' + json["issue"] + ')'
-            pub.vol = vol
-            pub.issn = json["ISSN"]
-            pub.year= json['published']['date-parts'][0][0]
-            pub.journal=json["container-title"]
-            print(" - OK!")
+            with urllib.request.urlopen(req, timeout=5) as f:
+                json = loads(f.read().decode("utf-8"))
+            pub=publicacion(json["title"],url)
+            pub.add_authors(json['author'])
+            try:
+                vol = ""
+                if 'volume' in json.keys():
+                    vol = json["volume"]
+                if 'page' in json.keys():
+                    vol = vol + ':' + json["page"]
+                elif 'issue' in json.keys():
+                    vol = vol + '(' + json["issue"] + ')'
+                pub.vol = vol
+                pub.issn = json["ISSN"]
+                pub.year= json['published']['date-parts'][0][0]
+                pub.journal=json["container-title"]
+                print(" - OK!")
+            except:
+                print(" - Error!")
+            if pub:
+                issn, impact, Q = journalsearch(pub.journal.upper())
+                #str(issn), f'{impact:.3f} ({Q})'
+                outpubz.append(pub)
+                print(pub.get_autorlist())
+            else:
+                print(pub.title, "No encontrado")
+            print(pub.title)
         except:
-            print(" - Error!")
-
-
-        # if bib:
-        #     issn, impact, Q = journalsearch(bib["journal"].upper())
-        #     out = "\t".join([bib['authors'], str(bib["year"][0][0]), bib['title'],bib["journal"] + ", " + bib["volume"] + " " + BASE_URL + line.strip(), "Publicada",str(issn), f'{impact:.3f} ({Q})']) + "\n"
-        #     out = out.replace('\u2010', '-')
-        #     outbibs.append(out)
-        # else:
-        #     print(bib, "No encontrado")
-
-        if pub:
-            issn, impact, Q = journalsearch(pub.journal.upper())
-            outpubz.append(pub)
-            print(pub.get_autorlist())
-        else:
-            print(pub.title, "No encontrado")
-
-
-        print()
-
-# with open('./' + bibfile, "w", encoding="utf-8") as wbib:
-#     for b in outbibs:
-#         wbib.write(b)
-
+            print('Help')
 with open('./t-' + bibfile, "w", encoding="utf-8") as wbib:
     for b in outpubz:
-        wbib.write(b.getstrtoprint())
+        wbib.write(b.getstrtoprint()+'\n')
