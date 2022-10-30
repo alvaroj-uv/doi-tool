@@ -1,11 +1,11 @@
-from fileinput import filename
-import sys
 import difflib as dl
-import pandas as pd
-from json import loads
+import sys
 import urllib.request
-from urllib.error import HTTPError
+from json import loads
+
 import numpy as np
+import pandas as pd
+import re
 
 BASE_URL = 'http://dx.doi.org/'
 JOURNALS = pd.read_csv("TodasUnique.csv")
@@ -27,10 +27,43 @@ samplebib = """
 }
 """
 
+class author:
+    def __init__(self, name, lastname):
+        self.name = name
+        self.lastname = lastname
+
+class publicacion:
+    def __init__(self, title,doi):
+        def clean_title(vtitle):
+            vtitle = re.compile(r'<[^>]+>').sub('', vtitle)
+            return ''.join(str(vtitle).replace('\n', ' ').replace('\r', '').split())
+        self.authors=[]
+        self.doi=doi
+        self.title=clean_title(title)
+        self.vol=''
+        self.issn=''
+        self.journal=''
+        self.anno=''
+    def add_authors(self,authorlist):
+        for nn in authorlist:
+            try:
+                autor = author(nn['given'], nn['family'])
+            except:
+                autor = author(nn['given'], '')
+            self.authors.append(autor)
+    def get_autorlist(self):
+        autlista=[]
+        for a in self.authors:
+            aut = a.lastname+' '+''.join([x[0] for x in a.name.split(' ')])
+            autlista.append(aut)
+        return ', '.join(autlista)
+
+    def getstrtoprint(self):
+        return self.get_autorlist()+self.anno+self.title+self.journal+self.vol+self.doi+"publicado"
 
 
 def journalsearch(journalname):
-    match = dl.get_close_matches(journalname, JOURNALS["Journal name"])
+    match = dl.get_close_matches(journalname, JOURNALS["Journal name"],n=1,cutoff=0.75)
     print("Matching", journalname, end=" ")
     if match:
         candidateRow = JOURNALS[JOURNALS["Journal name"] == match[0]]
@@ -44,6 +77,7 @@ def journalsearch(journalname):
     print("no match")
     return "X-X", 0.0, 'n/a'
 
+
 # script
 
 if len(sys.argv) > 1:
@@ -52,27 +86,22 @@ else:
     doifile = "PatricioOrio.doi"
 bibfile = doifile.split(".")[0] + ".txt"
 outbibs = []
+outpubz = []
 with open(doifile) as dois:
     for line in dois:
-        # print(doitojson(line.strip()),doitotxt(line.strip()))
-        # bib = doitojson(line.strip())
         if "doi.org" in line:
             line = line.split(".org/")[1]
         url = BASE_URL + line
         print(url, end=" JSON ")
         req = urllib.request.Request(url)
         req.add_header('Accept', 'application/json')
+
+        #try:
+        with urllib.request.urlopen(req, timeout=5) as f:
+            json = loads(f.read().decode("utf-8"))
+        pub=publicacion(json["title"],url)
+        pub.add_authors(json['author'])
         try:
-            with urllib.request.urlopen(req, timeout=5) as f:
-                json = loads(f.read().decode(
-                    "utf-8"))  # urllib.parse.unquote_plus(f.read().decode("utf-8"), encoding='utf-8', errors='replace'))
-            authlist = []
-            for nn in json['author']:
-                try:
-                    authlist.append(f"{nn['family']} " + ''.join([x[0] for x in nn['given'].split(' ')]))
-                except:
-                    authlist.append(f"{nn['family']}")
-            authorsF = ', '.join(authlist)
             vol = ""
             if 'volume' in json.keys():
                 vol = json["volume"]
@@ -80,37 +109,37 @@ with open(doifile) as dois:
                 vol = vol + ':' + json["page"]
             elif 'issue' in json.keys():
                 vol = vol + '(' + json["issue"] + ')'
-            newjson = {"authors": authorsF, "title": json["title"], "volume": vol, "issn": json["ISSN"],
-                       "year": json['published']['date-parts'], "journal": json["container-title"], }
-            while '  ' in newjson['title']:
-                newjson['title'] = newjson['title'].replace('  ', ' ')
-            newjson['title'] = newjson['title'].replace('\n ', '')
-            newjson['title'] = newjson['title'].replace('<sup>', '')
-            newjson['title'] = newjson['title'].replace('</sup>', '')
-            newjson['title'] = newjson['title'].replace('<sub>', '')
-            newjson['title'] = newjson['title'].replace('</sub>', '')
-
+            pub.vol = vol
+            pub.issn = json["ISSN"]
+            pub.year= json['published']['date-parts'][0][0]
+            pub.journal=json["container-title"]
             print(" - OK!")
-            bib = newjson
         except:
             print(" - Error!")
-            bib = {}
 
-        if bib:
-            # print(bib)
-            # bibdict = bibparser(bib)
-            # autores = ", ".join([a["given"]+" "+a["family"] for a in bib["authors"]])
-            issn, impact, Q = journalsearch(bib["journal"].upper())
-            out = "\t".join([bib['authors'], str(bib["year"][0][0]), bib['title'],
-                             bib["journal"] + ", " + bib["volume"] + " " + BASE_URL + line.strip(), "Publicada",
-                             str(issn), f'{impact:.3f} ({Q})']) + "\n"
-            out = out.replace('\u2010', '-')
 
-            outbibs.append(out)
+        # if bib:
+        #     issn, impact, Q = journalsearch(bib["journal"].upper())
+        #     out = "\t".join([bib['authors'], str(bib["year"][0][0]), bib['title'],bib["journal"] + ", " + bib["volume"] + " " + BASE_URL + line.strip(), "Publicada",str(issn), f'{impact:.3f} ({Q})']) + "\n"
+        #     out = out.replace('\u2010', '-')
+        #     outbibs.append(out)
+        # else:
+        #     print(bib, "No encontrado")
+
+        if pub:
+            issn, impact, Q = journalsearch(pub.journal.upper())
+            outpubz.append(pub)
+            print(pub.get_autorlist())
         else:
-            print(bib, "No encontrado")
+            print(pub.title, "No encontrado")
+
+
         print()
 
-with open('./' + bibfile, "w", encoding="utf-8") as wbib:
-    for b in outbibs:
-        wbib.write(b)
+# with open('./' + bibfile, "w", encoding="utf-8") as wbib:
+#     for b in outbibs:
+#         wbib.write(b)
+
+with open('./t-' + bibfile, "w", encoding="utf-8") as wbib:
+    for b in outpubz:
+        wbib.write(b.getstrtoprint())
