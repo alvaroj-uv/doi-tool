@@ -8,8 +8,8 @@ import pandas as pd
 import re
 
 BASE_URL = 'http://dx.doi.org/'
-JOURNALS = pd.read_csv("TodasUnique.csv")
-JOURNALS["Journal name"] = JOURNALS["Journal name"].str.upper()
+JOURNALS = pd.read_csv(delimiter='|',filepath_or_buffer="t-todasunique.txt")
+JOURNALS["Journal name"] = JOURNALS["Journal Name"].str.upper()
 
 samplebib = """
 @article{Frank_1970,
@@ -27,51 +27,60 @@ samplebib = """
 }
 """
 
+
 class author:
     def __init__(self, name, lastname):
         self.name = name
         self.lastname = lastname
 
+
 class publicacion:
-    def __init__(self, title,doi):
+    def __init__(self, title, doi):
         def clean(vtitle):
             vtitle = re.compile(r'<[^>]+>').sub('', vtitle)
             return ' '.join(str(vtitle).replace('\n', ' ').replace('\r', '').split())
-        self.authors=[]
-        self.doi=clean(doi)
-        self.title=clean(title)
-        self.vol=''
-        self.issn=''
-        self.journal=''
-        self.anno=''
-    def add_authors(self,authorlist):
+
+        self.authors = []
+        self.doi = clean(doi)
+        self.title = clean(title)
+        self.vol = ''
+        self.issn = ''
+        self.journal = ''
+        self.anno = ''
+        self.impact=''
+        self.found=False
+
+    def add_authors(self, authorlist):
         for nn in authorlist:
             try:
                 autor = author(nn['given'], nn['family'])
             except:
                 autor = author(nn['given'], '')
             self.authors.append(autor)
+
     def get_autorlist(self):
-        autlista=[]
+        autlista = []
         for a in self.authors:
-            aut = a.lastname+' '+''.join([x[0] for x in a.name.split(' ')])
+            aut = a.lastname + ' ' + ''.join([x[0] for x in a.name.split(' ')])
             autlista.append(aut)
         return ', '.join(autlista)
 
     def getstrtoprint(self):
-        return self.get_autorlist()+'|'+self.anno+'|'+self.title+'|'+self.journal+'|'+self.vol+'|'+self.doi+'|'+"publicado"
+        return self.get_autorlist() + '|' + self.anno + '|' + self.title + '|' + self.journal + '|' + self.vol + '|' + self.doi + '|' + "Publicada"+'|'+self.issn+'|'+self.impact
 
 
 def journalsearch(journalname):
-    match = dl.get_close_matches(journalname, JOURNALS["Journal name"],n=1,cutoff=0.75)
+    match = dl.get_close_matches(journalname, JOURNALS["Journal name"], n=1, cutoff=0.6)
     print("Matching", journalname, end=" ")
     if match:
         candidateRow = JOURNALS[JOURNALS["Journal name"] == match[0]]
         print("->", candidateRow["Journal name"].values[0])
         if candidateRow['ISSN'].values[0] is np.NAN:
-            return candidateRow["eISSN"].values[0], round(candidateRow["2021 JIF"].values[0], 3),candidateRow['JIF Quartile'].values[0]
+            return candidateRow["EISSN"].values[0], round(candidateRow["IF 2022"].values[0], 3), \
+                   candidateRow['JIF Quartile'].values[0]
         else:
-            return candidateRow["ISSN"].values[0], round(candidateRow["2021 JIF"].values[0], 3), candidateRow['JIF Quartile'].values[0]
+            return candidateRow["ISSN"].values[0], round(candidateRow["IF 2022"].values[0], 3), \
+                   candidateRow['JIF Quartile'].values[0]
     print("no match")
     return "X-X", 0.0, 'n/a'
 
@@ -81,7 +90,7 @@ def journalsearch(journalname):
 if len(sys.argv) > 1:
     doifile = sys.argv[1]
 else:
-    doifile = "PatricioOrio.doi"
+    doifile = "MagBio.doi"
 bibfile = doifile.split(".")[0] + ".txt"
 outpubz = []
 
@@ -94,9 +103,11 @@ with open(doifile) as dois:
         req = urllib.request.Request(url)
         req.add_header('Accept', 'application/json')
         try:
-            with urllib.request.urlopen(req, timeout=5) as f:
+            print("Connecting!")
+            with urllib.request.urlopen(req, timeout=10) as f:
                 json = loads(f.read().decode("utf-8"))
-            pub=publicacion(json["title"],url)
+            print("Response")
+            pub = publicacion(json["title"], url)
             pub.add_authors(json['author'])
             try:
                 vol = ""
@@ -108,21 +119,25 @@ with open(doifile) as dois:
                     vol = vol + '(' + json["issue"] + ')'
                 pub.vol = vol
                 pub.issn = json["ISSN"]
-                pub.year= json['published']['date-parts'][0][0]
-                pub.journal=json["container-title"]
+                pub.anno = str(json['published']['date-parts'][0][0])
+                pub.journal = json["container-title"]
                 print(" - OK!")
             except:
                 print(" - Error!")
             if pub:
                 issn, impact, Q = journalsearch(pub.journal.upper())
-                #str(issn), f'{impact:.3f} ({Q})'
+                pub.issn=str(issn)
+                pub.impact=f'{impact:.3f} ({Q})'
+                pub.found=True
+                # str(issn), f'{impact:.3f} ({Q})'
                 outpubz.append(pub)
                 print(pub.get_autorlist())
             else:
                 print(pub.title, "No encontrado")
             print(pub.title)
-        except:
-            print('Help')
+        except Exception as e:
+            print(str(e))
 with open('./t-' + bibfile, "w", encoding="utf-8") as wbib:
     for b in outpubz:
-        wbib.write(b.getstrtoprint()+'\n')
+        if b.found:
+            wbib.write(b.getstrtoprint() + '\n')
