@@ -1,15 +1,17 @@
-import difflib as dl
 import sys
 import urllib.request
 from json import loads
-
-import numpy as np
-import pandas as pd
+import sqlite3
 import re
+import html
+def get_json(url):
+    conn = sqlite3.connect('doidb.db')
+    vurl=''.join(url.splitlines())
+    cursor=conn.execute('select json from doi where url=?',(vurl,))
+    for fila in cursor:
+        return fila[0]
 
 BASE_URL = 'http://dx.doi.org/'
-JOURNALS = pd.read_csv(delimiter='|',filepath_or_buffer="t-todasunique.txt")
-JOURNALS["Journal name"] = JOURNALS["Journal Name"].str.upper()
 
 samplebib = """
 @article{Frank_1970,
@@ -29,17 +31,20 @@ samplebib = """
 
 
 class author:
-    def __init__(self, name, lastname):
+    def __init__(self, name, lastname,first):
         self.name = name
         self.lastname = lastname
+        self.first = first
 
 
 class publicacion:
     def __init__(self, title, doi):
         def clean(vtitle):
-            vtitle = re.compile(r'<[^>]+>').sub('', vtitle)
-            return ' '.join(str(vtitle).replace('\n', ' ').replace('\r', '').split())
-
+            if len(vtitle)>0:
+                vtitle = html.unescape(vtitle)
+                vtitle = re.compile(r'<[^>]+>').sub('', vtitle)
+                return ' '.join(str(vtitle).replace('\n', ' ').replace('\r', '').split())
+            return ''
         self.authors = []
         self.doi = clean(doi)
         self.title = clean(title)
@@ -52,36 +57,45 @@ class publicacion:
 
     def add_authors(self, authorlist):
         for nn in authorlist:
+            firstauthor=False
             try:
-                autor = author(nn['given'], nn['family'])
-            except:
-                autor = author(nn['given'], '')
+                if (nn.get('given')!=None) or (nn.get('family')!=None):
+                    if (nn.get('sequence') != None):
+                        if (nn['sequence'] == 'first'):
+                            firstauthor = True
+                    if (nn.get('given')!=None) and (nn.get('family')!=None):
+                        autor = author(nn['given'], nn['family'],firstauthor)
+                    elif nn.get('family')!=None:
+                        autor = author('',nn['family'],firstauthor)
+                    elif nn.get('given')!=None:
+                        autor = author(nn['given'], '',firstauthor)
+                    else:
+                        autor = 'Unresolved'
+            except Exception as e:
+                print(str(e) + " - Error en author!")
             self.authors.append(autor)
 
     def get_autorlist(self):
         autlista = []
         for a in self.authors:
-            aut = a.lastname + ' ' + ''.join([x[0] for x in a.name.split(' ')])
+            aut = a.lastname
+            if len(a.lastname)>0 and len(a.name)>0:
+                aut = a.lastname + ' ' + ''.join([x[0] for x in a.name.split(' ')])
             autlista.append(aut)
         return ', '.join(autlista)
 
     def getstrtoprint(self):
         return self.get_autorlist() + '|' + self.anno + '|' + self.title + '|' + self.journal + '|' + self.vol + '|' + self.doi + '|' + "Publicada"+'|'+self.issn+'|'+self.impact
 
-
-def journalsearch(journalname):
-    match = dl.get_close_matches(journalname, JOURNALS["Journal name"], n=1, cutoff=0.6)
-    print("Matching", journalname, end=" ")
-    if match:
-        candidateRow = JOURNALS[JOURNALS["Journal name"] == match[0]]
-        print("->", candidateRow["Journal name"].values[0])
-        if candidateRow['ISSN'].values[0] is np.NAN:
-            return candidateRow["EISSN"].values[0], round(candidateRow["IF 2022"].values[0], 3), \
-                   candidateRow['JIF Quartile'].values[0]
-        else:
-            return candidateRow["ISSN"].values[0], round(candidateRow["IF 2022"].values[0], 3), \
-                   candidateRow['JIF Quartile'].values[0]
-    print("no match")
+def journal_issn_search(journalissn):
+    conn = sqlite3.connect('doidb.db')
+    if len(journalissn)==1:
+        cursor=conn.execute('select w.ISSN,ifnull(w.IF_2022,0) if_2022,w.JIF_Quartile from WOS w where w.EISSN=? or w.ISSN=? or w.EISSN=? or w.ISSN=?',(json["ISSN"][0],json["ISSN"][0],json["ISSN"][0],json["ISSN"][0]))
+    else:
+        cursor = conn.execute('select w.ISSN,ifnull(w.IF_2022,0) if_2022,w.JIF_Quartile from WOS w where w.EISSN=? or w.ISSN=? or w.EISSN=? or w.ISSN=?',(json["ISSN"][1],json["ISSN"][1],json["ISSN"][0],json["ISSN"][0]))
+    for fila in cursor:
+        return fila[0],fila[1],fila[2]
+    print("ISSN Not in DB")
     return "X-X", 0.0, 'n/a'
 
 
@@ -99,14 +113,22 @@ with open(doifile) as dois:
         if "doi.org" in line:
             line = line.split(".org/")[1]
         url = BASE_URL + line
-        print(url, end=" JSON ")
+        print(url)
         req = urllib.request.Request(url)
         req.add_header('Accept', 'application/json')
         try:
             print("Connecting!")
-            with urllib.request.urlopen(req, timeout=10) as f:
-                json = loads(f.read().decode("utf-8"))
-            print("Response")
+            try:
+                json = loads(get_json(url).decode("utf-8"))
+                print("Response from db")
+            except Exception as e:
+                print(str(e))
+                try:
+                    with urllib.request.urlopen(req, timeout=15) as f:
+                        json = loads(f.read().decode("utf-8"))
+                    print("Response from  web")
+                except Exception as e:
+                    print(str(e))
             pub = publicacion(json["title"], url)
             pub.add_authors(json['author'])
             try:
@@ -121,15 +143,14 @@ with open(doifile) as dois:
                 pub.issn = json["ISSN"]
                 pub.anno = str(json['published']['date-parts'][0][0])
                 pub.journal = json["container-title"]
-                print(" - OK!")
-            except:
-                print(" - Error!")
+                print("Publication - OK!")
+            except Exception as e:
+                print(str(e)+" - Error!")
             if pub:
-                issn, impact, Q = journalsearch(pub.journal.upper())
+                issn, impact, Q = journal_issn_search(pub.issn)
                 pub.issn=str(issn)
                 pub.impact=f'{impact:.3f} ({Q})'
                 pub.found=True
-                # str(issn), f'{impact:.3f} ({Q})'
                 outpubz.append(pub)
                 print(pub.get_autorlist())
             else:
