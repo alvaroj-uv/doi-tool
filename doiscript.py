@@ -104,7 +104,7 @@ def journal_issn_search(journalissn):
 if len(sys.argv) > 1:
     doifile = sys.argv[1]
 else:
-    doifile = "MagBio.doi"
+    doifile = "PatricioOrio.doi"
 bibfile = doifile.split(".")[0] + ".txt"
 outpubz = []
 
