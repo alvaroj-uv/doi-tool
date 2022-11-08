@@ -88,10 +88,6 @@ class publicacion:
                 autlista.append(aut)
         return ', '.join(autlista)
 
-
-
-
-
     def getstrtoprint(self):
         return self.get_autorlist(True) +'|'+self.get_autorlist(False)+ '|' + self.anno + '|' + self.title + '|' + self.journal + '|' + self.vol + '|' + self.doi + '|' + "Publicada"+'|'+self.issn+'|'+self.impact
 
