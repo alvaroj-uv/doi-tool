@@ -32,8 +32,9 @@ samplebib = """
 
 class author:
     def __init__(self, name, lastname,first):
-        self.name = name
-        self.lastname = lastname
+        self.first = False
+        self.name = str(name).title()
+        self.lastname = str(lastname).title()
         self.first = first
 
 
@@ -75,17 +76,24 @@ class publicacion:
                 print(str(e) + " - Error en author!")
             self.authors.append(autor)
 
-    def get_autorlist(self):
+    def get_autorlist(self,all):
         autlista = []
         for a in self.authors:
             aut = a.lastname
             if len(a.lastname)>0 and len(a.name)>0:
                 aut = a.lastname + ' ' + ''.join([x[0] for x in a.name.split(' ')])
-            autlista.append(aut)
+            if not all and a.first:
+                autlista.append(aut)
+            else:
+                autlista.append(aut)
         return ', '.join(autlista)
 
+
+
+
+
     def getstrtoprint(self):
-        return self.get_autorlist() + '|' + self.anno + '|' + self.title + '|' + self.journal + '|' + self.vol + '|' + self.doi + '|' + "Publicada"+'|'+self.issn+'|'+self.impact
+        return self.get_autorlist(True) +'|'+self.get_autorlist(False)+ '|' + self.anno + '|' + self.title + '|' + self.journal + '|' + self.vol + '|' + self.doi + '|' + "Publicada"+'|'+self.issn+'|'+self.impact
 
 def journal_issn_search(journalissn):
     conn = sqlite3.connect('doidb.db')
@@ -104,7 +112,7 @@ def journal_issn_search(journalissn):
 if len(sys.argv) > 1:
     doifile = sys.argv[1]
 else:
-    doifile = "PatricioOrio.doi"
+    doifile = "MagBio.doi"
 bibfile = doifile.split(".")[0] + ".txt"
 outpubz = []
 
@@ -152,7 +160,7 @@ with open(doifile) as dois:
                 pub.impact=f'{impact:.3f} ({Q})'
                 pub.found=True
                 outpubz.append(pub)
-                print(pub.get_autorlist())
+                print(pub.get_autorlist(True))
             else:
                 print(pub.title, "No encontrado")
             print(pub.title)
